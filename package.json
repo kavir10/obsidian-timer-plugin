@@ -1,0 +1,24 @@
+{
+  "name": "obsidian-timer-plugin",
+  "version": "1.0.0",
+  "description": "A simple timer plugin for Obsidian with slash commands for start, pause, stop, and inserting current time.",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production"
+  },
+  "keywords": [
+    "obsidian",
+    "plugin",
+    "timer"
+  ],
+  "author": "Kavir",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^16.11.6",
+    "builtin-modules": "^5.0.0",
+    "esbuild": "0.13.12",
+    "obsidian": "^1.1.1",
+    "typescript": "^4.4.4"
+  }
+}
