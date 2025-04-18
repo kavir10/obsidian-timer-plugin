@@ -1,6 +1,15 @@
-import { Plugin, Editor, MarkdownView, Notice } from 'obsidian';
+import { App, Plugin, Editor, MarkdownView, Notice, PluginSettingTab, Setting } from 'obsidian';
+
+interface TimerPluginSettings {
+    playSound: boolean;
+}
+
+const DEFAULT_SETTINGS: TimerPluginSettings = {
+    playSound: true
+}
 
 export default class TimerPlugin extends Plugin {
+    settings: TimerPluginSettings;
     private timerStatus: 'stopped' | 'running' | 'paused' = 'stopped';
     private startTime: number = 0;
     private elapsedTime: number = 0;
@@ -8,13 +17,18 @@ export default class TimerPlugin extends Plugin {
     private statusBarItem: HTMLElement | null = null;
 
     async onload() {
+        await this.loadSettings();
+        
         console.log('Loading Timer plugin');
+
+        // Add settings tab
+        this.addSettingTab(new TimerSettingTab(this.app, this));
 
         // Create status bar item
         this.statusBarItem = this.addStatusBarItem();
         this.updateStatusBar();
 
-        // Register the slash commands
+        // Register the slash commands in specific order
         this.addCommand({
             id: 'start-timer',
             name: 'Timer: start',
@@ -24,18 +38,18 @@ export default class TimerPlugin extends Plugin {
         });
 
         this.addCommand({
-            id: 'pause-timer',
-            name: 'Timer: pause',
-            callback: () => {
-                this.pauseTimer();
-            }
-        });
-
-        this.addCommand({
             id: 'stop-timer',
             name: 'Timer: stop',
             callback: () => {
                 this.stopTimer();
+            }
+        });
+
+        this.addCommand({
+            id: 'pause-timer',
+            name: 'Timer: pause',
+            callback: () => {
+                this.pauseTimer();
             }
         });
 
@@ -160,5 +174,39 @@ export default class TimerPlugin extends Plugin {
                 this.statusBarItem.setText('⏱️ Timer ready');
                 break;
         }
+    }
+
+    async loadSettings() {
+        this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    }
+
+    async saveSettings() {
+        await this.saveData(this.settings);
+    }
+}
+
+class TimerSettingTab extends PluginSettingTab {
+    plugin: TimerPlugin;
+
+    constructor(app: App, plugin: TimerPlugin) {
+        super(app, plugin);
+        this.plugin = plugin;
+    }
+
+    display(): void {
+        const {containerEl} = this;
+        containerEl.empty();
+
+        containerEl.createEl('h2', {text: 'Timer Settings'});
+
+        new Setting(containerEl)
+            .setName('Play Sound')
+            .setDesc('Play a sound when timer stops')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.playSound)
+                .onChange(async (value) => {
+                    this.plugin.settings.playSound = value;
+                    await this.plugin.saveSettings();
+                }));
     }
 }
