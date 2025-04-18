@@ -2,10 +2,12 @@ import { App, Plugin, Editor, MarkdownView, Notice, PluginSettingTab, Setting } 
 
 interface TimerPluginSettings {
     playSound: boolean;
+    customSoundPath: string;
 }
 
 const DEFAULT_SETTINGS: TimerPluginSettings = {
-    playSound: true
+    playSound: true,
+    customSoundPath: 'timer_stop.mp3'
 }
 
 export default class TimerPlugin extends Plugin {
@@ -18,15 +20,15 @@ export default class TimerPlugin extends Plugin {
 
     async onload() {
         await this.loadSettings();
-        
-        console.log('Loading Timer plugin');
 
-        // Add settings tab
-        this.addSettingTab(new TimerSettingTab(this.app, this));
+        console.log('Loading Timer plugin');
 
         // Create status bar item
         this.statusBarItem = this.addStatusBarItem();
         this.updateStatusBar();
+
+        // Add settings tab
+        this.addSettingTab(new TimerSettingTab(this.app, this));
 
         // Register the slash commands in specific order
         this.addCommand({
@@ -132,6 +134,26 @@ export default class TimerPlugin extends Plugin {
             this.timerInterval = null;
         }
         
+        // Play sound if enabled
+        if (this.settings.playSound) {
+            try {
+                const audio = new Audio(this.app.vault.adapter.getResourcePath(this.settings.customSoundPath));
+                audio.play().catch(error => {
+                    console.error('Failed to play timer sound:', error);
+                });
+            } catch (error) {
+                console.error('Failed to load timer sound:', error);
+            }
+        }
+
+        // Insert elapsed time at cursor
+        const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+        if (view) {
+            const editor = view.editor;
+            const formattedTime = this.formatElapsedTime(elapsedTime);
+            editor.replaceSelection(formattedTime);
+        }
+        
         this.updateStatusBar();
         new Notice('Timer stopped. Total time: ' + this.formatElapsedTime(elapsedTime));
     }
@@ -201,11 +223,22 @@ class TimerSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Play Sound')
-            .setDesc('Play a sound when timer stops')
+            .setDesc('Play a sound when the timer stops')
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.playSound)
                 .onChange(async (value) => {
                     this.plugin.settings.playSound = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Custom Sound Path')
+            .setDesc('Path to custom sound file (relative to plugin directory)')
+            .addText(text => text
+                .setPlaceholder('timer_stop.mp3')
+                .setValue(this.plugin.settings.customSoundPath)
+                .onChange(async (value) => {
+                    this.plugin.settings.customSoundPath = value;
                     await this.plugin.saveSettings();
                 }));
     }
