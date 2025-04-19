@@ -1,4 +1,5 @@
 import { App, Plugin, Editor, MarkdownView, Notice, PluginSettingTab, Setting } from 'obsidian';
+import { resolve } from 'path';
 
 interface TimerPluginSettings {
     playSound: boolean;
@@ -116,6 +117,39 @@ export default class TimerPlugin extends Plugin {
         new Notice('Timer paused. Elapsed time: ' + this.formatElapsedTime(this.elapsedTime));
     }
 
+    private async playTimerSound() {
+        if (!this.settings.playSound) return;
+
+        try {
+            // Get the plugin directory path
+            const pluginDir = this.app.vault.configDir + '/plugins/obsidian-timer-plugin';
+            const soundPath = resolve(pluginDir, this.settings.customSoundPath);
+            
+            // Create audio element
+            const audio = new Audio();
+            
+            // Convert file path to proper URL
+            audio.src = `file://${soundPath}`;
+            
+            // Wait for audio to load before playing
+            audio.addEventListener('canplaythrough', () => {
+                audio.play().catch(error => {
+                    console.error('Failed to play timer sound:', error);
+                    new Notice('Failed to play timer sound. Please check your sound settings.');
+                });
+            });
+
+            audio.addEventListener('error', (error) => {
+                console.error('Error loading timer sound:', error);
+                new Notice('Failed to load timer sound file. Please check if the file exists.');
+            });
+
+        } catch (error) {
+            console.error('Failed to initialize timer sound:', error);
+            new Notice('Failed to initialize timer sound. Please check your sound settings.');
+        }
+    }
+
     private stopTimer() {
         if (this.timerStatus === 'stopped') {
             new Notice('Timer is not running.');
@@ -135,16 +169,7 @@ export default class TimerPlugin extends Plugin {
         }
         
         // Play sound if enabled
-        if (this.settings.playSound) {
-            try {
-                const audio = new Audio(this.app.vault.adapter.getResourcePath(this.settings.customSoundPath));
-                audio.play().catch(error => {
-                    console.error('Failed to play timer sound:', error);
-                });
-            } catch (error) {
-                console.error('Failed to load timer sound:', error);
-            }
-        }
+        this.playTimerSound();
 
         // Insert elapsed time at cursor
         const view = this.app.workspace.getActiveViewOfType(MarkdownView);

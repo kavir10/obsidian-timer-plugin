@@ -4,10 +4,7 @@
   "version": "1.0.0",
   "minAppVersion": "0.12.0",
   "description": "A simple timer plugin for Obsidian with slash commands for start, pause, stop, and inserting current time.",
-  "author": "Kavir",
-  "authorUrl": "https://github.com/yourusername",
-  "isDesktopOnly": false,
-  "assets": [
-    "assets/timer_stop.mp3"
-  ]
+  "author": "Kavir Kaycee",
+  "authorUrl": "https://github.com/kavir10",
+  "isDesktopOnly": false
 }
