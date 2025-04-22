@@ -1,0 +1,18 @@
+.timer-status-bar-item {
+    cursor: pointer;
+    transition: opacity 0.2s ease-in-out;
+}
+
+.timer-status-bar-item:hover {
+    opacity: 0.8;
+}
+
+/* Add visual feedback for clickable state */
+.timer-status-bar-item.timer-ready:hover {
+    color: var(--interactive-accent);
+}
+
+/* Add visual feedback for running state */
+.timer-status-bar-item.timer-running:hover {
+    color: var(--text-error);
+} 

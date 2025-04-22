@@ -6,5 +6,6 @@
   "description": "A simple timer plugin for Obsidian with slash commands for start, pause, stop, and inserting current time.",
   "author": "Kavir Kaycee",
   "authorUrl": "https://github.com/kavir10",
-  "isDesktopOnly": false
+  "isDesktopOnly": false,
+  "css": "styles.css"
 }

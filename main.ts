@@ -32,6 +32,7 @@ export default class TimerPlugin extends Plugin {
     private elapsedTime: number = 0;
     private timerInterval: number | null = null;
     private statusBarItem: HTMLElement | null = null;
+    private lastActiveEditor: Editor | null = null;
 
     // Helper functions for time entries
     private extractProjects(text: string): string[] {
@@ -151,8 +152,31 @@ export default class TimerPlugin extends Plugin {
 
         console.log('Loading Timer plugin');
 
+        // Track last active editor
+        this.registerEvent(
+            this.app.workspace.on('active-leaf-change', (leaf) => {
+                if (leaf?.view instanceof MarkdownView) {
+                    this.lastActiveEditor = leaf.view.editor;
+                }
+            })
+        );
+
         // Create status bar item
         this.statusBarItem = this.addStatusBarItem();
+        this.statusBarItem.addClass('timer-status-bar-item');
+        
+        // Add click handler
+        this.statusBarItem.onClickEvent((evt: MouseEvent) => {
+            evt.preventDefault();
+            if (this.timerStatus === 'running') {
+                this.stopTimer();
+            } else {
+                this.startTimer();
+            }
+        });
+
+        // Add hover state
+        this.statusBarItem.title = 'Click to start/stop timer';
         this.updateStatusBar();
 
         // Add settings tab
@@ -325,9 +349,9 @@ export default class TimerPlugin extends Plugin {
         // Add entry to Time Tracker file
         await this.addTimeEntry(timeEntry);
 
-        // Insert elapsed time at cursor (original behavior)
-        if (view) {
-            const editor = view.editor;
+        // Insert elapsed time at cursor (using last active editor if available)
+        const editor = view?.editor || this.lastActiveEditor;
+        if (editor) {
             editor.replaceSelection(formattedTime);
         }
         
@@ -361,16 +385,26 @@ export default class TimerPlugin extends Plugin {
     private updateStatusBar() {
         if (!this.statusBarItem) return;
 
+        // Remove all state classes first
+        this.statusBarItem.removeClass('timer-running');
+        this.statusBarItem.removeClass('timer-ready');
+
         switch (this.timerStatus) {
             case 'running':
                 const currentElapsedTime = Date.now() - this.startTime;
                 this.statusBarItem.setText(`⏱️ ${this.formatElapsedTime(currentElapsedTime)}`);
+                this.statusBarItem.addClass('timer-running');
+                this.statusBarItem.title = 'Click to stop timer';
                 break;
             case 'paused':
                 this.statusBarItem.setText(`⏸️ ${this.formatElapsedTime(this.elapsedTime)}`);
+                this.statusBarItem.addClass('timer-ready');
+                this.statusBarItem.title = 'Click to start timer';
                 break;
             case 'stopped':
                 this.statusBarItem.setText('⏱️ Timer ready');
+                this.statusBarItem.addClass('timer-ready');
+                this.statusBarItem.title = 'Click to start timer';
                 break;
         }
     }
