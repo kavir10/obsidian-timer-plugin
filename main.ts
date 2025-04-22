@@ -4,11 +4,25 @@ import { resolve } from 'path';
 interface TimerPluginSettings {
     playSound: boolean;
     customSoundPath: string;
+    timeTrackerFilePath: string;
+    captureActiveFile: boolean;
 }
 
 const DEFAULT_SETTINGS: TimerPluginSettings = {
     playSound: true,
-    customSoundPath: 'timer_stop.mp3'
+    customSoundPath: 'timer_stop.mp3',
+    timeTrackerFilePath: 'Time Tracker.md',
+    captureActiveFile: true
+}
+
+// Define the TimeEntry interface
+interface TimeEntry {
+    date: string;           // YYYY-MM-DD
+    dayOfWeek: string;      // Monday, Tuesday, etc.
+    duration: string;       // Formatted duration
+    taskDetails?: string;   // Text from line where cursor is
+    projects?: string[];    // Array of [[page references]]
+    tags?: string[];        // Array of #tags
 }
 
 export default class TimerPlugin extends Plugin {
@@ -18,6 +32,119 @@ export default class TimerPlugin extends Plugin {
     private elapsedTime: number = 0;
     private timerInterval: number | null = null;
     private statusBarItem: HTMLElement | null = null;
+
+    // Helper functions for time entries
+    private extractProjects(text: string): string[] {
+        const projectRegex = /\[\[(.*?)\]\]/g;
+        const projects: string[] = [];
+        let match;
+        while ((match = projectRegex.exec(text)) !== null) {
+            projects.push(match[0]);
+        }
+        return projects;
+    }
+
+    private extractTags(text: string): string[] {
+        const tagRegex = /#(\S+)/g;
+        const tags: string[] = [];
+        let match;
+        while ((match = tagRegex.exec(text)) !== null) {
+            tags.push(match[0]);
+        }
+        return tags;
+    }
+
+    private getCurrentDate(): string {
+        const date = new Date();
+        return date.toISOString().split('T')[0];
+    }
+
+    private getDayOfWeek(): string {
+        return new Date().toLocaleDateString('en-US', { weekday: 'long' });
+    }
+
+    // Time Tracker file management
+    private async ensureTimeTrackerFile(): Promise<boolean> {
+        const filePath = this.settings.timeTrackerFilePath;
+        try {
+            const fileExists = await this.app.vault.adapter.exists(filePath);
+            if (!fileExists) {
+                await this.app.vault.create(
+                    filePath,
+                    'Time entries tracked by Obsidian Timer Plugin\n\n'
+                );
+                return true;
+            }
+            return true;
+        } catch (error) {
+            console.error('Failed to ensure Time Tracker file:', error);
+            new Notice('Failed to create or access Time Tracker file');
+            return false;
+        }
+    }
+
+    private formatTimeEntry(entry: TimeEntry): string {
+        // Start with date and day
+        let formattedEntry = `- Date: ${entry.date} | Day: ${entry.dayOfWeek} | Duration: ${entry.duration}`;
+        
+        // Add task details if available, but remove project references and tags
+        if (entry.taskDetails) {
+            let cleanTaskDetails = entry.taskDetails;
+            // Remove project references
+            cleanTaskDetails = cleanTaskDetails.replace(/\[\[.*?\]\]/g, '');
+            // Remove tags
+            cleanTaskDetails = cleanTaskDetails.replace(/#\S+/g, '');
+            // Clean up any extra spaces and trim
+            cleanTaskDetails = cleanTaskDetails.replace(/\s+/g, ' ').trim();
+            
+            if (cleanTaskDetails) {
+                formattedEntry += ` | Task: ${cleanTaskDetails}`;
+            }
+        }
+        
+        // Add projects if available
+        if (entry.projects && entry.projects.length > 0) {
+            formattedEntry += ` | Project: ${entry.projects.join(', ')}`;
+        }
+        
+        // Add tags if available
+        if (entry.tags && entry.tags.length > 0) {
+            formattedEntry += ` | Tags: ${entry.tags.join(', ')}`;
+        }
+        
+        return formattedEntry;
+    }
+
+    private async addTimeEntry(entry: TimeEntry): Promise<boolean> {
+        const filePath = this.settings.timeTrackerFilePath;
+        try {
+            const fileReady = await this.ensureTimeTrackerFile();
+            if (!fileReady) return false;
+
+            const formattedEntry = this.formatTimeEntry(entry);
+            const fileContents = await this.app.vault.adapter.read(filePath);
+            
+            // Split the content into lines
+            const lines = fileContents.split('\n');
+            
+            // Insert the new entry after the descriptive line and blank line (index 2)
+            const insertPosition = 2;
+            
+            // Insert the new entry
+            lines.splice(insertPosition, 0, formattedEntry);
+            
+            // Join the lines back together
+            const updatedContents = lines.join('\n');
+
+            await this.app.vault.adapter.write(filePath, updatedContents);
+            new Notice(`Time entry added to ${filePath}`);
+            return true;
+        } catch (error) {
+            console.error('Failed to add time entry:', error);
+            new Notice('Failed to add time entry to Time Tracker file');
+            return false;
+        }
+    }
 
     async onload() {
         await this.loadSettings();
@@ -150,7 +277,7 @@ export default class TimerPlugin extends Plugin {
         }
     }
 
-    private stopTimer() {
+    private async stopTimer() {
         if (this.timerStatus === 'stopped') {
             new Notice('Timer is not running.');
             return;
@@ -169,18 +296,43 @@ export default class TimerPlugin extends Plugin {
         }
         
         // Play sound if enabled
-        this.playTimerSound();
+        await this.playTimerSound();
 
-        // Insert elapsed time at cursor
+        // Format elapsed time
+        const formattedTime = this.formatElapsedTime(elapsedTime);
+
+        // Create time entry
+        const timeEntry: TimeEntry = {
+            date: this.getCurrentDate(),
+            dayOfWeek: this.getDayOfWeek(),
+            duration: formattedTime,
+        };
+
+        // Get task details from current file if available
         const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+        if (view && this.settings.captureActiveFile) {
+            const editor = view.editor;
+            const cursor = editor.getCursor();
+            const line = editor.getLine(cursor.line);
+            
+            if (line && line.trim()) {
+                timeEntry.taskDetails = line.trim();
+                timeEntry.projects = this.extractProjects(line);
+                timeEntry.tags = this.extractTags(line);
+            }
+        }
+
+        // Add entry to Time Tracker file
+        await this.addTimeEntry(timeEntry);
+
+        // Insert elapsed time at cursor (original behavior)
         if (view) {
             const editor = view.editor;
-            const formattedTime = this.formatElapsedTime(elapsedTime);
             editor.replaceSelection(formattedTime);
         }
         
         this.updateStatusBar();
-        new Notice('Timer stopped. Total time: ' + this.formatElapsedTime(elapsedTime));
+        new Notice('Timer stopped. Total time: ' + formattedTime);
     }
 
     private insertCurrentTime(editor: Editor) {
@@ -264,6 +416,27 @@ class TimerSettingTab extends PluginSettingTab {
                 .setValue(this.plugin.settings.customSoundPath)
                 .onChange(async (value) => {
                     this.plugin.settings.customSoundPath = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Time Tracker File Path')
+            .setDesc('Path to the time tracker file')
+            .addText(text => text
+                .setPlaceholder('Time Tracker.md')
+                .setValue(this.plugin.settings.timeTrackerFilePath)
+                .onChange(async (value) => {
+                    this.plugin.settings.timeTrackerFilePath = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Capture Active File')
+            .setDesc('Capture time entries for the active file')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.captureActiveFile)
+                .onChange(async (value) => {
+                    this.plugin.settings.captureActiveFile = value;
                     await this.plugin.saveSettings();
                 }));
     }
