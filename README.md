@@ -1,29 +1,36 @@
 # Obsidian Timer Plugin
 
-A simple timer plugin for Obsidian that allows you to start, pause, and stop timers using slash commands, as well as insert the current time in your notes.
+A simple timer plugin for Obsidian that lets you start, pause, and stop timers from the command palette or the status bar, log time entries to a tracker note, and insert the current time into your notes.
 
 ## Features
 
-- **Timer Management via Slash Commands**
-  - `/Timer: start` - Start a new timer or resume a paused one
-  - `/Timer: pause` - Pause the currently running timer
-  - `/Timer: stop` - Stop the timer and display the total elapsed time
-  
-- **Time Insertion**
-  - `/Timer: insert time` - Insert the current time in HH:MM AM/PM format at the cursor position
+- **Timer commands** (via the command palette or hotkeys)
+  - `Start timer` - Start a new timer or resume a paused one
+  - `Pause timer` - Pause the currently running timer
+  - `Stop timer` - Stop the timer, log a time entry, and show the total elapsed time
+  - `Insert current time` - Insert the current time in HH:MM AM/PM format at the cursor position
 
-- **Status Bar Integration**
+- **Clickable status bar**
   - View the current timer status and elapsed time directly in the Obsidian status bar
-  - Visual indicators for running (⏱️), paused (⏸️), and stopped states
+  - Click to start, resume, or stop the timer
+  - Visual indicators for running (⏱️), paused (⏸️), and ready states
+
+- **Time tracking**
+  - Every stopped timer is logged to a tracker note (default: `Time Tracker.md`, newest entries on top)
+  - Entries capture the date, day of week, and duration
+  - Optionally captures the line under your cursor as the task, including `[[project]]` links and `#tags`
+
+- **Sound notification**
+  - Optionally play a sound when the timer stops (customizable sound file)
 
 - **Notifications**
-  - Receive notifications when a timer is started, paused, or stopped
+  - Receive notifications when a timer is started, paused, resumed, or stopped
 
 ## Use Cases
 
-- **Pomodoro Technique** - Start a 25-minute timer for focused work sessions
+- **Pomodoro Technique** - Start a timer for focused work sessions
 - **Meeting Notes** - Track how long meetings run by starting a timer at the beginning
-- **Time Tracking** - Keep track of how long you spend on specific tasks or projects
+- **Time Tracking** - Keep a running log of how long you spend on specific tasks or projects
 - **Time Stamps** - Quickly insert the current time into your notes
 
 ## Installation
@@ -40,36 +47,43 @@ A simple timer plugin for Obsidian that allows you to start, pause, and stop tim
 3. Make sure you have the following files in `.obsidian/plugins/obsidian-timer-plugin/`:
    - `main.js`
    - `manifest.json`
+   - `styles.css`
 4. Restart Obsidian
 5. Enable the plugin in Settings → Community plugins
 
 ## Usage
 
-1. **Starting a Timer**
-   - In any note, type `/Timer: start`
-   - A notification will appear indicating the timer has started
-   - The timer status and elapsed time will appear in the status bar
+1. **Starting a timer**
+   - Run `Start timer` from the command palette, or click the timer in the status bar
+   - The timer status and elapsed time appear in the status bar
 
-2. **Pausing a Timer**
-   - Type `/Timer: pause` to pause the current timer
-   - The elapsed time will be preserved
+2. **Pausing a timer**
+   - Run `Pause timer` to pause the current timer; the elapsed time is preserved
+   - Click the status bar (or run `Start timer`) to resume
 
-3. **Stopping a Timer**
-   - Type `/Timer: stop` to stop the current timer
-   - A notification will display the total elapsed time
+3. **Stopping a timer**
+   - Run `Stop timer` or click the running timer in the status bar
+   - A time entry is added to your tracker note, and the elapsed time can optionally be inserted at the cursor
 
-4. **Inserting the Current Time**
-   - Place your cursor where you want to insert the time
-   - Type `/Timer: insert time`
-   - The current time will be inserted in HH:MM AM/PM format
+4. **Inserting the current time**
+   - Place your cursor where you want to insert the time and run `Insert current time`
+
+## Settings
+
+| Setting | Description | Default |
+| --- | --- | --- |
+| Play sound | Play a sound when the timer stops | On |
+| Sound file | Path to the sound file, relative to the plugin folder | `timer_stop.mp3` |
+| Time tracker file | Vault path of the note where time entries are logged | `Time Tracker.md` |
+| Capture task from active note | Include the line under the cursor (task text, `[[projects]]` and `#tags`) in each time entry | On |
+| Insert duration on stop | Insert the elapsed time at the cursor position when the timer stops | On |
 
 ## Planned Features
 
 - [ ] Customizable time formats
 - [ ] Timer presets (e.g., 5 min, 25 min, 50 min)
-- [ ] Timer history
-- [ ] Sound notifications
 - [ ] Timer labels
+- [ ] Persist a running timer across app restarts
 
 ## Contributing
 
@@ -88,7 +102,7 @@ If you want to contribute to the plugin or customize it for your own use:
 1. Clone this repository
 2. Install dependencies with `npm install`
 3. Build the plugin with `npm run build`
-4. Copy `main.js` and `manifest.json` to your vault's `.obsidian/plugins/obsidian-timer-plugin/` directory
+4. Copy `main.js`, `manifest.json`, and `styles.css` to your vault's `.obsidian/plugins/obsidian-timer-plugin/` directory
 
 ## License
 
