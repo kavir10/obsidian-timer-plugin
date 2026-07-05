@@ -1,19 +1,22 @@
-import { App, Plugin, Editor, MarkdownView, Notice, PluginSettingTab, Setting } from 'obsidian';
-import { resolve } from 'path';
+import { App, Plugin, Editor, MarkdownView, Notice, PluginSettingTab, Setting, TFile, normalizePath } from 'obsidian';
 
 interface TimerPluginSettings {
     playSound: boolean;
     customSoundPath: string;
     timeTrackerFilePath: string;
     captureActiveFile: boolean;
+    insertDurationOnStop: boolean;
 }
 
 const DEFAULT_SETTINGS: TimerPluginSettings = {
     playSound: true,
     customSoundPath: 'timer_stop.mp3',
     timeTrackerFilePath: 'Time Tracker.md',
-    captureActiveFile: true
+    captureActiveFile: true,
+    insertDurationOnStop: true
 }
+
+const TIME_TRACKER_HEADER = 'Time entries tracked by Obsidian Timer Plugin';
 
 // Define the TimeEntry interface
 interface TimeEntry {
@@ -46,18 +49,20 @@ export default class TimerPlugin extends Plugin {
     }
 
     private extractTags(text: string): string[] {
-        const tagRegex = /#(\S+)/g;
-        const tags: string[] = [];
-        let match;
-        while ((match = tagRegex.exec(text)) !== null) {
-            tags.push(match[0]);
-        }
-        return tags;
+        // Match Obsidian-style tags (letters, digits, _, -, /) so trailing
+        // punctuation like "#work," doesn't end up in the tag
+        const tagRegex = /#[\w/-]+/g;
+        return text.match(tagRegex) ?? [];
     }
 
     private getCurrentDate(): string {
+        // Format the local date; toISOString() would return the UTC date,
+        // which is off by one after midnight UTC
         const date = new Date();
-        return date.toISOString().split('T')[0];
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
     }
 
     private getDayOfWeek(): string {
@@ -65,80 +70,83 @@ export default class TimerPlugin extends Plugin {
     }
 
     // Time Tracker file management
-    private async ensureTimeTrackerFile(): Promise<boolean> {
-        const filePath = this.settings.timeTrackerFilePath;
+    private async ensureTimeTrackerFile(): Promise<TFile | null> {
+        const filePath = normalizePath(this.settings.timeTrackerFilePath);
         try {
-            const fileExists = await this.app.vault.adapter.exists(filePath);
-            if (!fileExists) {
-                await this.app.vault.create(
-                    filePath,
-                    'Time entries tracked by Obsidian Timer Plugin\n\n'
-                );
-                return true;
+            const existing = this.app.vault.getAbstractFileByPath(filePath);
+            if (existing instanceof TFile) {
+                return existing;
             }
-            return true;
+            if (existing) {
+                new Notice(`Time tracker path points to a folder: ${filePath}`);
+                return null;
+            }
+            return await this.app.vault.create(filePath, `${TIME_TRACKER_HEADER}\n\n`);
         } catch (error) {
             console.error('Failed to ensure Time Tracker file:', error);
             new Notice('Failed to create or access Time Tracker file');
-            return false;
+            return null;
         }
     }
 
     private formatTimeEntry(entry: TimeEntry): string {
         // Start with date and day
         let formattedEntry = `- Date: ${entry.date} | Day: ${entry.dayOfWeek} | Duration: ${entry.duration}`;
-        
+
         // Add task details if available, but remove project references and tags
         if (entry.taskDetails) {
             let cleanTaskDetails = entry.taskDetails;
             // Remove project references
             cleanTaskDetails = cleanTaskDetails.replace(/\[\[.*?\]\]/g, '');
             // Remove tags
-            cleanTaskDetails = cleanTaskDetails.replace(/#\S+/g, '');
+            cleanTaskDetails = cleanTaskDetails.replace(/#[\w/-]+/g, '');
             // Clean up any extra spaces and trim
             cleanTaskDetails = cleanTaskDetails.replace(/\s+/g, ' ').trim();
-            
+
             if (cleanTaskDetails) {
                 formattedEntry += ` | Task: ${cleanTaskDetails}`;
             }
         }
-        
+
         // Add projects if available
         if (entry.projects && entry.projects.length > 0) {
             formattedEntry += ` | Project: ${entry.projects.join(', ')}`;
         }
-        
+
         // Add tags if available
         if (entry.tags && entry.tags.length > 0) {
             formattedEntry += ` | Tags: ${entry.tags.join(', ')}`;
         }
-        
+
         return formattedEntry;
     }
 
     private async addTimeEntry(entry: TimeEntry): Promise<boolean> {
-        const filePath = this.settings.timeTrackerFilePath;
         try {
-            const fileReady = await this.ensureTimeTrackerFile();
-            if (!fileReady) return false;
+            const file = await this.ensureTimeTrackerFile();
+            if (!file) return false;
 
             const formattedEntry = this.formatTimeEntry(entry);
-            const fileContents = await this.app.vault.adapter.read(filePath);
-            
-            // Split the content into lines
-            const lines = fileContents.split('\n');
-            
-            // Insert the new entry after the descriptive line and blank line (index 2)
-            const insertPosition = 2;
-            
-            // Insert the new entry
-            lines.splice(insertPosition, 0, formattedEntry);
-            
-            // Join the lines back together
-            const updatedContents = lines.join('\n');
 
-            await this.app.vault.adapter.write(filePath, updatedContents);
-            new Notice(`Time entry added to ${filePath}`);
+            // vault.process applies the change atomically and keeps
+            // Obsidian's cache (and any open editors) in sync
+            await this.app.vault.process(file, (contents) => {
+                const lines = contents.split('\n');
+
+                // Newest entries go on top: insert before the first existing
+                // entry, or after the header block if there are none yet
+                let insertPosition = lines.findIndex(line => line.startsWith('- Date:'));
+                if (insertPosition === -1) {
+                    const lastNonEmpty = lines.reduce(
+                        (last, line, i) => line.trim() ? i : last, -1);
+                    insertPosition = lastNonEmpty + 1;
+                }
+
+                lines.splice(insertPosition, 0, formattedEntry);
+                return lines.join('\n');
+            });
+
+            new Notice(`Time entry added to ${file.path}`);
             return true;
         } catch (error) {
             console.error('Failed to add time entry:', error);
@@ -149,8 +157,6 @@ export default class TimerPlugin extends Plugin {
 
     async onload() {
         await this.loadSettings();
-
-        console.log('Loading Timer plugin');
 
         // Track last active editor
         this.registerEvent(
@@ -164,7 +170,7 @@ export default class TimerPlugin extends Plugin {
         // Create status bar item
         this.statusBarItem = this.addStatusBarItem();
         this.statusBarItem.addClass('timer-status-bar-item');
-        
+
         // Add click handler
         this.statusBarItem.onClickEvent((evt: MouseEvent) => {
             evt.preventDefault();
@@ -182,10 +188,11 @@ export default class TimerPlugin extends Plugin {
         // Add settings tab
         this.addSettingTab(new TimerSettingTab(this.app, this));
 
-        // Register the slash commands in specific order
+        // Obsidian prefixes command names with the plugin name in the
+        // palette; IDs stay unchanged so existing hotkeys keep working
         this.addCommand({
             id: 'start-timer',
-            name: 'Timer: start',
+            name: 'Start timer',
             callback: () => {
                 this.startTimer();
             }
@@ -193,7 +200,7 @@ export default class TimerPlugin extends Plugin {
 
         this.addCommand({
             id: 'stop-timer',
-            name: 'Timer: stop',
+            name: 'Stop timer',
             callback: () => {
                 this.stopTimer();
             }
@@ -201,7 +208,7 @@ export default class TimerPlugin extends Plugin {
 
         this.addCommand({
             id: 'pause-timer',
-            name: 'Timer: pause',
+            name: 'Pause timer',
             callback: () => {
                 this.pauseTimer();
             }
@@ -209,7 +216,7 @@ export default class TimerPlugin extends Plugin {
 
         this.addCommand({
             id: 'insert-current-time',
-            name: 'Timer: insert time',
+            name: 'Insert current time',
             editorCallback: (editor: Editor) => {
                 this.insertCurrentTime(editor);
             }
@@ -217,8 +224,11 @@ export default class TimerPlugin extends Plugin {
     }
 
     onunload() {
-        console.log('Unloading Timer plugin');
-        if (this.timerInterval) {
+        this.clearTimerInterval();
+    }
+
+    private clearTimerInterval() {
+        if (this.timerInterval !== null) {
             window.clearInterval(this.timerInterval);
             this.timerInterval = null;
         }
@@ -230,7 +240,8 @@ export default class TimerPlugin extends Plugin {
             return;
         }
 
-        if (this.timerStatus === 'paused') {
+        const resuming = this.timerStatus === 'paused';
+        if (resuming) {
             // Resume the timer
             this.startTime = Date.now() - this.elapsedTime;
         } else {
@@ -240,14 +251,14 @@ export default class TimerPlugin extends Plugin {
         }
 
         this.timerStatus = 'running';
-        
+
         // Update status bar every second
-        this.timerInterval = window.setInterval(() => {
+        this.timerInterval = this.registerInterval(window.setInterval(() => {
             this.updateStatusBar();
-        }, 1000);
-        
+        }, 1000));
+
         this.updateStatusBar();
-        new Notice('Timer started.');
+        new Notice(resuming ? 'Timer resumed.' : 'Timer started.');
     }
 
     private pauseTimer() {
@@ -258,12 +269,8 @@ export default class TimerPlugin extends Plugin {
 
         this.elapsedTime = Date.now() - this.startTime;
         this.timerStatus = 'paused';
-        
-        if (this.timerInterval) {
-            window.clearInterval(this.timerInterval);
-            this.timerInterval = null;
-        }
-        
+        this.clearTimerInterval();
+
         this.updateStatusBar();
         new Notice('Timer paused. Elapsed time: ' + this.formatElapsedTime(this.elapsedTime));
     }
@@ -272,32 +279,22 @@ export default class TimerPlugin extends Plugin {
         if (!this.settings.playSound) return;
 
         try {
-            // Get the plugin directory path
-            const pluginDir = this.app.vault.configDir + '/plugins/obsidian-timer-plugin';
-            const soundPath = resolve(pluginDir, this.settings.customSoundPath);
-            
-            // Create audio element
-            const audio = new Audio();
-            
-            // Convert file path to proper URL
-            audio.src = `file://${soundPath}`;
-            
-            // Wait for audio to load before playing
-            audio.addEventListener('canplaythrough', () => {
-                audio.play().catch(error => {
-                    console.error('Failed to play timer sound:', error);
-                    new Notice('Failed to play timer sound. Please check your sound settings.');
-                });
-            });
+            const pluginDir = this.manifest.dir;
+            if (!pluginDir) return;
 
-            audio.addEventListener('error', (error) => {
-                console.error('Error loading timer sound:', error);
-                new Notice('Failed to load timer sound file. Please check if the file exists.');
-            });
+            const soundPath = normalizePath(`${pluginDir}/${this.settings.customSoundPath}`);
+            if (!(await this.app.vault.adapter.exists(soundPath))) {
+                new Notice(`Timer sound file not found: ${this.settings.customSoundPath}`);
+                return;
+            }
 
+            // getResourcePath returns an app:// URL that works on both
+            // desktop and mobile (file:// URLs are blocked by Obsidian)
+            const audio = new Audio(this.app.vault.adapter.getResourcePath(soundPath));
+            await audio.play();
         } catch (error) {
-            console.error('Failed to initialize timer sound:', error);
-            new Notice('Failed to initialize timer sound. Please check your sound settings.');
+            console.error('Failed to play timer sound:', error);
+            new Notice('Failed to play timer sound. Please check your sound settings.');
         }
     }
 
@@ -307,18 +304,14 @@ export default class TimerPlugin extends Plugin {
             return;
         }
 
-        const elapsedTime = this.timerStatus === 'running' 
+        const elapsedTime = this.timerStatus === 'running'
             ? Date.now() - this.startTime
             : this.elapsedTime;
 
         this.timerStatus = 'stopped';
         this.elapsedTime = 0;
-        
-        if (this.timerInterval) {
-            window.clearInterval(this.timerInterval);
-            this.timerInterval = null;
-        }
-        
+        this.clearTimerInterval();
+
         // Play sound if enabled
         await this.playTimerSound();
 
@@ -338,7 +331,7 @@ export default class TimerPlugin extends Plugin {
             const editor = view.editor;
             const cursor = editor.getCursor();
             const line = editor.getLine(cursor.line);
-            
+
             if (line && line.trim()) {
                 timeEntry.taskDetails = line.trim();
                 timeEntry.projects = this.extractProjects(line);
@@ -350,11 +343,18 @@ export default class TimerPlugin extends Plugin {
         await this.addTimeEntry(timeEntry);
 
         // Insert elapsed time at cursor (using last active editor if available)
-        const editor = view?.editor || this.lastActiveEditor;
-        if (editor) {
-            editor.replaceSelection(formattedTime);
+        if (this.settings.insertDurationOnStop) {
+            const editor = view?.editor || this.lastActiveEditor;
+            if (editor) {
+                try {
+                    editor.replaceSelection(formattedTime);
+                } catch (error) {
+                    // The last active editor may belong to a closed pane
+                    console.error('Failed to insert elapsed time:', error);
+                }
+            }
         }
-        
+
         this.updateStatusBar();
         new Notice('Timer stopped. Total time: ' + formattedTime);
     }
@@ -366,20 +366,20 @@ export default class TimerPlugin extends Plugin {
         const ampm = hours >= 12 ? 'PM' : 'AM';
         const formattedHours = hours % 12 || 12;
         const formattedMinutes = minutes < 10 ? '0' + minutes : minutes;
-        
+
         const timeString = `${formattedHours}:${formattedMinutes} ${ampm}`;
         editor.replaceSelection(timeString);
     }
 
     private formatElapsedTime(milliseconds: number): string {
-        const seconds = Math.floor(milliseconds / 1000);
-        const minutes = Math.floor(seconds / 60);
-        const hours = Math.floor(minutes / 60);
-        
-        const remainingMinutes = minutes % 60;
-        const remainingSeconds = seconds % 60;
-        
-        return `${hours}h ${remainingMinutes}m ${remainingSeconds}s`;
+        const totalSeconds = Math.floor(milliseconds / 1000);
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+
+        if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+        if (minutes > 0) return `${minutes}m ${seconds}s`;
+        return `${seconds}s`;
     }
 
     private updateStatusBar() {
@@ -390,16 +390,17 @@ export default class TimerPlugin extends Plugin {
         this.statusBarItem.removeClass('timer-ready');
 
         switch (this.timerStatus) {
-            case 'running':
+            case 'running': {
                 const currentElapsedTime = Date.now() - this.startTime;
                 this.statusBarItem.setText(`⏱️ ${this.formatElapsedTime(currentElapsedTime)}`);
                 this.statusBarItem.addClass('timer-running');
                 this.statusBarItem.title = 'Click to stop timer';
                 break;
+            }
             case 'paused':
                 this.statusBarItem.setText(`⏸️ ${this.formatElapsedTime(this.elapsedTime)}`);
                 this.statusBarItem.addClass('timer-ready');
-                this.statusBarItem.title = 'Click to start timer';
+                this.statusBarItem.title = 'Click to resume timer';
                 break;
             case 'stopped':
                 this.statusBarItem.setText('⏱️ Timer ready');
@@ -430,10 +431,8 @@ class TimerSettingTab extends PluginSettingTab {
         const {containerEl} = this;
         containerEl.empty();
 
-        containerEl.createEl('h2', {text: 'Timer Settings'});
-
         new Setting(containerEl)
-            .setName('Play Sound')
+            .setName('Play sound')
             .setDesc('Play a sound when the timer stops')
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.playSound)
@@ -443,8 +442,8 @@ class TimerSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('Custom Sound Path')
-            .setDesc('Path to custom sound file (relative to plugin directory)')
+            .setName('Sound file')
+            .setDesc('Path to the sound file, relative to the plugin folder')
             .addText(text => text
                 .setPlaceholder('timer_stop.mp3')
                 .setValue(this.plugin.settings.customSoundPath)
@@ -454,8 +453,8 @@ class TimerSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('Time Tracker File Path')
-            .setDesc('Path to the time tracker file')
+            .setName('Time tracker file')
+            .setDesc('Vault path of the note where time entries are logged')
             .addText(text => text
                 .setPlaceholder('Time Tracker.md')
                 .setValue(this.plugin.settings.timeTrackerFilePath)
@@ -465,12 +464,22 @@ class TimerSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('Capture Active File')
-            .setDesc('Capture time entries for the active file')
+            .setName('Capture task from active note')
+            .setDesc('Include the line under the cursor (task text, [[projects]] and #tags) in each time entry')
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.captureActiveFile)
                 .onChange(async (value) => {
                     this.plugin.settings.captureActiveFile = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Insert duration on stop')
+            .setDesc('Insert the elapsed time at the cursor position when the timer stops')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.insertDurationOnStop)
+                .onChange(async (value) => {
+                    this.plugin.settings.insertDurationOnStop = value;
                     await this.plugin.saveSettings();
                 }));
     }

@@ -1,11 +1,10 @@
 {
   "id": "obsidian-timer-plugin",
   "name": "Timer Plugin",
-  "version": "1.0.0",
-  "minAppVersion": "0.12.0",
-  "description": "A simple timer plugin for Obsidian with slash commands for start, pause, stop, and inserting current time.",
+  "version": "1.1.0",
+  "minAppVersion": "1.1.0",
+  "description": "A simple timer plugin for Obsidian with commands for start, pause, stop, time tracking, and inserting the current time.",
   "author": "Kavir Kaycee",
   "authorUrl": "https://github.com/kavir10",
-  "isDesktopOnly": false,
-  "css": "styles.css"
+  "isDesktopOnly": false
 }
