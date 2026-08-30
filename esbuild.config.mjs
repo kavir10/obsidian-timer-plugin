@@ -1,6 +1,7 @@
 import esbuild from "esbuild";
 import process from "process";
 import builtins from "builtin-modules";
+import { copyFileSync, existsSync } from "fs";
 
 const banner =
 `/*
@@ -30,4 +31,15 @@ esbuild.build({
     sourcemap: prod ? false : 'inline',
     treeShaking: true,
     outfile: 'main.js',
+}).then(() => {
+    // The default sound setting points at 'timer_stop.mp3' in the plugin
+    // root, but the source file lives in assets/ - ship it at the expected
+    // location so a default install can actually play the completion sound.
+    const sound = 'assets/timer_stop.mp3';
+    if (existsSync(sound)) {
+        copyFileSync(sound, 'timer_stop.mp3');
+        console.log('copied assets/timer_stop.mp3 -> timer_stop.mp3');
+    } else {
+        console.warn('warning: assets/timer_stop.mp3 missing; default sound will not play');
+    }
 }).catch(() => process.exit(1));
