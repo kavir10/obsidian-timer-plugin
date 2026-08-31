@@ -70,6 +70,19 @@ export default class TimerPlugin extends Plugin {
         try {
             const fileExists = await this.app.vault.adapter.exists(filePath);
             if (!fileExists) {
+                // vault.create fails when parent folders don't exist - a
+                // configured path like "tracking/time.md" was unusable on a
+                // fresh vault. Create the folder chain first.
+                const parent = filePath.split('/').slice(0, -1).join('/');
+                if (parent) {
+                    let current = '';
+                    for (const segment of parent.split('/')) {
+                        current = current ? `${current}/${segment}` : segment;
+                        if (!(await this.app.vault.adapter.exists(current))) {
+                            await this.app.vault.createFolder(current);
+                        }
+                    }
+                }
                 await this.app.vault.create(
                     filePath,
                     'Time entries tracked by Obsidian Timer Plugin\n\n'
