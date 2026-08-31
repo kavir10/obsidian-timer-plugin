@@ -56,8 +56,13 @@ export default class TimerPlugin extends Plugin {
     }
 
     private getCurrentDate(): string {
+        // Local date, not UTC: toISOString() is UTC, so near midnight the
+        // date and the (local) weekday belonged to different days.
         const date = new Date();
-        return date.toISOString().split('T')[0];
+        const yyyy = date.getFullYear();
+        const mm = String(date.getMonth() + 1).padStart(2, '0');
+        const dd = String(date.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
     }
 
     private getDayOfWeek(): string {
@@ -311,14 +316,14 @@ export default class TimerPlugin extends Plugin {
             ? Date.now() - this.startTime
             : this.elapsedTime;
 
-        this.timerStatus = 'stopped';
-        this.elapsedTime = 0;
-        
-        if (this.timerInterval) {
-            window.clearInterval(this.timerInterval);
-            this.timerInterval = null;
-        }
-        
+        // Capture the insertion target BEFORE any awaits: the user can move
+        // the cursor while the sound plays and the entry writes, and
+        // replaceSelection afterwards would insert the duration wherever the
+        // cursor happened to land.
+        const viewAtStop = this.app.workspace.getActiveViewOfType(MarkdownView);
+        const insertEditor = viewAtStop?.editor || this.lastActiveEditor;
+        const insertCursor = insertEditor?.getCursor();
+
         // Play sound if enabled
         await this.playTimerSound();
 
@@ -333,9 +338,8 @@ export default class TimerPlugin extends Plugin {
         };
 
         // Get task details from current file if available
-        const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-        if (view && this.settings.captureActiveFile) {
-            const editor = view.editor;
+        if (viewAtStop && this.settings.captureActiveFile) {
+            const editor = viewAtStop.editor;
             const cursor = editor.getCursor();
             const line = editor.getLine(cursor.line);
             
@@ -346,13 +350,27 @@ export default class TimerPlugin extends Plugin {
             }
         }
 
-        // Add entry to Time Tracker file
-        await this.addTimeEntry(timeEntry);
+        // Add entry to Time Tracker file. Only discard the timer state after
+        // the write succeeds: previously the timer was stopped and zeroed
+        // first, so a failed write silently lost the recorded time while a
+        // success notice still appeared.
+        const written = await this.addTimeEntry(timeEntry);
+        if (!written) {
+            new Notice('Could not save the time entry - timer left running. Total so far: ' + formattedTime);
+            return;
+        }
 
-        // Insert elapsed time at cursor (using last active editor if available)
-        const editor = view?.editor || this.lastActiveEditor;
-        if (editor) {
-            editor.replaceSelection(formattedTime);
+        this.timerStatus = 'stopped';
+        this.elapsedTime = 0;
+        
+        if (this.timerInterval) {
+            window.clearInterval(this.timerInterval);
+            this.timerInterval = null;
+        }
+
+        // Insert elapsed time where the cursor was when the timer stopped
+        if (insertEditor && insertCursor) {
+            insertEditor.replaceRange(formattedTime, insertCursor);
         }
         
         this.updateStatusBar();
