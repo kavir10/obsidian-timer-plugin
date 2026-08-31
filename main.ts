@@ -1,5 +1,7 @@
 import { App, Plugin, Editor, MarkdownView, Notice, PluginSettingTab, Setting } from 'obsidian';
-import { resolve } from 'path';
+// No Node 'path' import: the manifest declares isDesktopOnly=false, and the
+// path module does not exist on Obsidian mobile, so importing it broke
+// plugin activation there. Vault-relative strings use forward slashes.
 
 interface TimerPluginSettings {
     playSound: boolean;
@@ -272,15 +274,17 @@ export default class TimerPlugin extends Plugin {
         if (!this.settings.playSound) return;
 
         try {
-            // Get the plugin directory path
+            // Get the plugin directory path (forward-slash join; see imports)
             const pluginDir = this.app.vault.configDir + '/plugins/obsidian-timer-plugin';
-            const soundPath = resolve(pluginDir, this.settings.customSoundPath);
+            const custom = this.settings.customSoundPath.replace(/^\/+/, '');
+            const soundPath = `${pluginDir}/${custom}`;
             
             // Create audio element
             const audio = new Audio();
             
-            // Convert file path to proper URL
-            audio.src = `file://${soundPath}`;
+            // getResourcePath returns a URL the current platform can actually
+            // load (a raw file:// path does not work on mobile).
+            audio.src = this.app.vault.adapter.getResourcePath(soundPath);
             
             // Wait for audio to load before playing
             audio.addEventListener('canplaythrough', () => {
